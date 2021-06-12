@@ -1,0 +1,291 @@
+---
+title: "EDA"
+author: "Shafeek Saleem"
+date: "11/21/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(xgboost)
+library(MLmetrics)
+library(lubridate)
+library(corrplot)
+library(truncnorm)
+library(gridExtra)
+```
+
+```{r}
+setwd('C:\\Users\\octavei\\OneDrive - John Keells Holdings PLC\\Desktop\\MyFiles\\UoC Mini Hackathon')
+```
+
+### Load data
+
+```{r load-data}
+train <- read.csv("train_data.csv",na.strings = "")
+test <- read.csv("test_data.csv",na.strings = "")
+```
+
+### Change order of variables 
+```{r}
+train <- train %>% select(colnames(test),"app_status")
+```
+
+* * *
+
+## Explonatory Data Analysis
+
+### Feature description
+
+* * *
+
+The features used in the structure are:
+
+   NURSERY            Evaluation of applications for nursery schools
+   . EMPLOY           Employment of parents and child's nursery
+   . . parents        Parents' occupation
+   . . has_nurs       Child's nursery
+   . STRUCT_FINAN     Family structure and financial standings
+   . . STRUCTURE      Family structure
+   . . . form         Form of the family
+   . . . children     Number of children
+   . . housing        Housing conditions
+   . . finance        Financial standing of the family
+   . SOC_HEALTH       Social and health picture of the family
+   . . social         Social conditions
+   . . health         Health conditions
+
+* * *
+
+### Initial analysis
+```{r}
+str(train)
+```
+**Decisions -**
+
+1. `app_status` should be Factor variables.
+2. `ID` should be removed.
+
+
+```{r}
+train <- train %>% select(-ID)
+test <- test %>% select(-ID)
+train$app_status <- as.factor(train$app_status)
+train$has_nurs = factor(train$has_nurs, levels = c("proper", "less_proper", "improper", "critical", "very_crit"))
+train$housing = factor(train$housing, levels = c("convenient", "less_conv", "critical"))
+train$social = factor(train$social, levels = c("nonprob", "slightly_prob", "problematic"))
+train$form = factor(train$form, levels = c("complete", "completed", "incomplete", "foster"))
+```
+
+* * *
+
+### Handling missing/ null values
+
+```{r}
+train %>% summarise(Feature = colnames(train),"Total MissingValues" = colSums(is.na(train)),"MissingValues(%)" = round(colSums(is.na(train))/n()*100,2))
+test %>% summarise(Feature = colnames(test),"Total MissingValues" = colSums(is.na(test)), "MissingValues(%)" = round(colSums(is.na(test))/n()*100,2))
+```
+
+**Observations and Decisions -** 
+
+1. No missing or null values found in both train and test datasets.
+
+* * *
+
+### Target class/Y distribution
+
+Univariate analysis of Target variable : Survived
+```{r}
+train %>% group_by(app_status) %>% summarise(perc = n()*100/nrow(train))
+train %>% ggplot(aes(x=as.factor(app_status)))+geom_bar(fill = "#56B4E9")+labs(x='app_status',y='Count',title = "Target Class Distribution")
+```
+
+**Note -**
+
+ Target class distribution is slightly imbalanced - Train dataset contains 64.5% of class 0 and 35.5% of class 1. One good solution would be up sampling which can cuase over fitting. Another solution would be to use weight parameters with algorithms like xgboost. 
+
+* * *
+
+* * *
+
+## Multivariate analysis - Features vs Target
+* * *
+
+## 1. Employment
+* * *
+### 1.1. Employment of parents
+
+```{r}
+train %>%
+  ggplot(aes(x=parents, fill=app_status))+geom_bar(position="fill")+labs(x='Parents Occupation',y='Percentage')
+
+train %>% 
+  group_by(parents) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+```
+
+**Note -** Feature class  distribution is balanced.
+
+**Observations -**
+
+1. Applications with, parent's employment as usual, have ~30% more chance to get accepted than parents with great_pret employment. 
+
+* * *
+
+### 1.2. Child's nursery
+
+```{r}
+train %>%
+  ggplot(aes(x=has_nurs, fill=app_status))+geom_bar(position="fill")+coord_flip() +labs(x="Child's nursery",y='Percentage')
+
+train %>% 
+  group_by(has_nurs) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+```
+
+**Note -** Feature class  distribution is balanced.
+
+**Observations -**
+
+1. The probability of an application getting accepted is increasing with the child's nursery from very cretical to proper (~8% to ~58%). 
+
+* * *
+
+## 2. Family structure and Financial standings
+* * *
+### 2.1. Family structure
+
+```{r}
+plot1 <- train %>%
+  ggplot(aes(x=form, fill=app_status))+
+  geom_bar(position="fill")+
+  labs(x='Form of the family',y='Percentage')+
+  scale_fill_manual(values = c("#FFDB6D", "#C4961A"))+
+  coord_flip() 
+
+plot2 <- train %>%
+  ggplot(aes(x=children, fill=app_status))+
+  geom_bar(position="fill")+
+  labs(x='Number of children',y='Percentage')+
+  scale_fill_manual(values = c("#56B4E9", "#009E73"))
+
+grid.arrange(plot1, plot2, ncol=2)
+
+train %>% 
+  group_by(form) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+
+train %>% 
+  group_by(children) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+```
+
+**Note -** class  distribution of both classes are balanced.
+
+**Observations -**
+
+1. Applications with, complete family form have ~7% more chance to be accepted than foster families. The order for probabilty of acceptance is foster < incomplete < completed < complete.
+
+2. The probability of an application getting accepted is decreasing with the number of children in a family (~41% to ~32%). 
+
+* * *
+
+### 2.2. Housing conditions
+
+```{r}
+train %>%
+  ggplot(aes(x=housing, fill=app_status))+
+  geom_bar(position="fill")+coord_flip()+
+  labs(x="Housing conditions",y='Percentage')+
+  scale_fill_manual(values = c("#56B4E9", "#009E73"))
+
+train %>% 
+  group_by(housing) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+```
+
+**Note -** Feature class  distribution is balanced.
+
+**Observations -**
+
+1. Applications with, convenient housing conditions have ~13%% more chance to be accepted than applications with critical house conditions.
+
+
+### 2.3. Financial standing of the family
+
+```{r}
+train %>%
+  ggplot(aes(x=finance, fill=app_status))+
+  geom_bar(position="fill")+
+  labs(x="Financial standing of the family",y='Percentage')+
+  scale_fill_manual(values = c("#56B4E9", "#009E72"))
+
+train %>% 
+  group_by(finance) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+```
+
+**Note -** Feature class  distribution is balanced.
+
+**Observations -**
+
+1. Applications with, convenient financial standings have ~5% more chance to be accepted than applications with inconvenient financial standings.
+* * *
+
+## 3. Social and health picture of the family
+* * *
+
+### 3.1. Social conditions
+
+```{r}
+train %>%
+  ggplot(aes(x=social, fill=app_status))+
+  geom_bar(position="fill")+
+  labs(x="Social conditions",y='Percentage')+
+  scale_fill_manual(values = c("yellow4", "yellow3"))
+
+train %>% 
+  group_by(social) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+```
+
+**Note -** Feature class  distribution is balanced.
+
+**Observations -**
+
+1. Applications with non-problemetic or slightly-problemetic social conditions have almost equal chance of getting accepted.
+2. But applications with problemetic social conditions have ~10% lesser chance of getting accepted than the other two categories.
+* * *
+
+### 3.2. Health conditions
+
+```{r}
+train %>%
+  ggplot(aes(x=health, fill=app_status))+
+  geom_bar(position="fill")+
+  labs(x="Health conditions",y='Percentage')+
+  scale_fill_manual(values = c("#56B4E9", "#009E73"))
+
+train %>% 
+  group_by(health) %>% 
+  summarise(Count = n(), "App status Rate ( % )" = sum(app_status==1)/n()*100, .groups = 'drop')
+```
+
+**Note -** Feature class  distribution is balanced.
+
+**Observations -**
+
+1. Applications with not-recommended health conditions have 100% chance of getting rejected. Health conditions play a major role in selection of applications.
+2. Applications with recommended health conditions have ~64% chance of getting accepted.
+3. Applications with priority health conditions have ~43% chance of getting accepted.
+
+* * *
+
